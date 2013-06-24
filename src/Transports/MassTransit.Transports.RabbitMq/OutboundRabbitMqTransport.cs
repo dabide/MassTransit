@@ -14,6 +14,7 @@ namespace MassTransit.Transports.RabbitMq
 {
     using System;
     using System.Collections;
+    using System.Globalization;
     using System.IO;
     using Magnum;
     using RabbitMQ.Client;
@@ -60,7 +61,7 @@ namespace MassTransit.Transports.RabbitMq
                                 (value.Kind == DateTimeKind.Utc
                                      ? value - SystemUtil.UtcNow
                                      : value - SystemUtil.Now).
-                                    TotalMilliseconds.ToString();
+                                    TotalMilliseconds.ToString("F0", CultureInfo.InvariantCulture);
                         }
 
                         using (var body = new MemoryStream())
@@ -69,11 +70,22 @@ namespace MassTransit.Transports.RabbitMq
                             properties.Headers = context.Headers.ToDictionary(entry => entry.Key, entry => entry.Value);
                             properties.Headers["Content-Type"]=context.ContentType;
 
+#if NET40
+                            var task = _producer.PublishAsync(_address.Name, properties, body.ToArray());
+                            task.Wait();
+#else
                             _producer.Publish(_address.Name, properties, body.ToArray());
+#endif
 
                             _address.LogSent(context.MessageId ?? "", context.MessageType);
                         }
                     }
+#if NET40
+                    catch (AggregateException ex)
+                    {
+                        throw new InvalidConnectionException(_address.Uri, "Publisher did not confirm message", ex.InnerException);
+                    }
+#endif
                     catch (AlreadyClosedException ex)
                     {
                         throw new InvalidConnectionException(_address.Uri, "Connection was already closed", ex);
